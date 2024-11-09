@@ -204,7 +204,7 @@ void add_new_reaction(char * path, int client_socket) {
 		return;
 	}
 
-	if (universa[realID].num_reaction == 100) {
+	if (universal[realID].num_reaction == 100) {
 		handle_404(path, client_socket);
 		return;
 	}

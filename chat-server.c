@@ -89,10 +89,10 @@ void handle_response(char *request, int client_socket) {
 			create_new_reaction(path, client_socket);
 		}
 	}
-	else if (strstr(path, "/reset") != 0) {
+	else if (strcmp(path, "/reset") == 0) {
 			free_stuff();
 	}
-	else if (strstr(path, "/chats") != 0) {
+	else if (strcmp(path, "/chats") == 0) {
 		print_chat(client_socket);
 	}
 	else {
@@ -107,7 +107,12 @@ void handle_response(char *request, int client_socket) {
 
 void create_new_chat(char *path, int client_socket) {
 
-	
+	if (chat_size > 100000) {
+		handle_404(path, client_socket);
+		return;
+	}
+
+		
 	printf("You have entered created new chat with path \'%s\'\n", path);
 	//DECODE THE PATH TO THE RIGHT FORMAT
 	char decoded_path[strlen(path)];
@@ -119,6 +124,11 @@ void create_new_chat(char *path, int client_socket) {
 	char * endP = strstr(decoded_path, "&message=");
 	int length = endP - startP;
 
+	if (length == 0) {
+		handle_404(path, client_socket);
+		return;
+	}
+
 	char * tempUser = calloc(length, sizeof(char));
 	strncpy(tempUser, startP, length);
 	printf("%s\n", tempUser);
@@ -126,7 +136,7 @@ void create_new_chat(char *path, int client_socket) {
 
 	
 	//CHECK IF USERNAME BIGGER THAN 16 BYTES
-	if (strlen(tempUser) > 16 || strlen(tempUser) < 1) {
+	if (strlen(tempUser) > 15 || strlen(tempUser) < 1) {
 		handle_404(path, client_socket);
 		free(tempUser);
 		return;
@@ -134,13 +144,20 @@ void create_new_chat(char *path, int client_socket) {
 
 	//GET THE LENGTH OF THE MESSAGE, endP points to the first character and strlen iterates till we get a null term
 	length = strlen(endP + strlen("&message="));
+	
+	if (length == 0) {
+		handle_404(path, client_socket);
+		free(tempUser);
+		return;
+	}
+
 	char * tempMessage = calloc(length, sizeof(char));
 	strncpy(tempMessage, endP + strlen("&message="), length);
 	printf("%s\n", tempMessage);
 	printf("%d\n", length);
 	
 	//CHECK IF MESSAGE LESS THAN 1 BYTES
-	if (strlen(tempMessage) < 1) {
+	if (strlen(tempMessage) < 1 || strlen(tempMessage) > 255) {
 		handle_404(path, client_socket);
 		free(tempUser);
 		free(tempMessage);
@@ -198,13 +215,19 @@ void create_new_reaction(char * path, int client_socket) {
 	char * startP = strstr(decoded_path, "/react?user=") + strlen("/react?user=");
 	char * endP = strstr(decoded_path, "&message=");
 	int length = endP - startP;
+	
+	if (length == 0) {
+		handle_404(path, client_socket);
+		return;
+	}
+	
 	char * tempUser = calloc(length, sizeof(char));
 	strncpy(tempUser, startP, length);
 	printf("%s\n", tempUser);
 	printf("%d\n", length);
 	
 	//CHECK IF USERNAME BIGGER THAN 16 BYTES
-	if (strlen(tempUser) > 16 || strlen(tempUser) <= 0) {
+	if (strlen(tempUser) > 15 || strlen(tempUser) < 1) {
 		handle_404(path, client_socket);
 		free(tempUser);
 		return;
@@ -214,7 +237,13 @@ void create_new_reaction(char * path, int client_socket) {
 	//GET THE LENGTH OF THE MESSAGE
 	endP = strstr(decoded_path, "&id=");
 	startP = strstr(decoded_path, "&message=") + strlen("&message=");
-	length = endP - startP;
+	length = endP - startP;	
+	
+	if (length == 0) {
+		handle_404(path, client_socket);
+		return;
+	}
+	
 	char * tempMessage = calloc(length, sizeof(char));
 	strncpy(tempMessage, startP, length);
 	printf("%s\n", tempMessage);
@@ -222,7 +251,7 @@ void create_new_reaction(char * path, int client_socket) {
 
 	
 	//CHECK IF MESSAGE BIGGER THAN 16 BYTES
-	if (strlen(tempMessage) > 16) {
+	if (strlen(tempMessage) > 15) {
 		handle_404(path, client_socket);
 		free(tempUser);
 		free(tempMessage);
@@ -231,6 +260,12 @@ void create_new_reaction(char * path, int client_socket) {
 
 	startP = endP + strlen("&id=");
 	length = strlen(startP);
+	
+	if (length == 0) {
+		handle_404(path, client_socket);
+		return;
+	}
+	
 	char * tempID = calloc(length, sizeof(char));
 	strncpy(tempID, startP, length);
 	printf("%s\n", tempID);
@@ -240,7 +275,7 @@ void create_new_reaction(char * path, int client_socket) {
 	free(tempID);
 	
 	//CHECK IF ID IS BIGGER THAN CHAT SIZE OR NEGATIVE
-	if (realID < 0 || realID > chat_id - 1) {
+	if ((realID < 0) || (realID > chat_id - 1) || (universal[realID].num_reaction > 100)) {
 		handle_404(path, client_socket);
 		return;
 	}
@@ -311,6 +346,7 @@ void free_stuff() {
 			free(universal[i].reactions[j].user);
 			free(universal[i].reactions[j].message);
 		}
+		free(universal[i].reactions);
 	}
 
 	free(universal);

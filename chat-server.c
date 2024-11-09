@@ -167,7 +167,7 @@ void add_new_reaction(char * path, int client_socket) {
 	char * endP1 = strstr(decoded_path, "&message=");
 	int userNameLength = endP1 - startP1;
 
-	printf("Name Length: %ld\n", userNameLength);
+	printf("Name Length: %d\n", userNameLength);
 
 	if ((userNameLength == 0) || (userNameLength >= MAX_USERNAME_SIZE)) {
 		handle_404(path, client_socket);

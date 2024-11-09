@@ -1,359 +1,248 @@
 #include <stdio.h>
 #include "http-server.h"
 #include <string.h>
-#include <stdint.h>
-#include <time.h>
 #include <stdlib.h>
-
+#include <time.h>
+#include <stdint.h>
 
 typedef struct Reaction Reaction;
 typedef struct Chat Chat;
 
+uint32_t const MAX_USERNAME_SIZE = 16;
+uint32_t const MAX_MESSAGE_SIZE = 256;
+uint32_t const MAX_BUFFER_SIZE = 2048;
 
-int chat_id = 0;
-int chat_size = 0;
-char const* HTTP_200_OK = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n";
-char const* HTTP_404_NOT_FOUND = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n";
+char const * HTTP_200_OK = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n";
+char const * HTTP_404_NOT_FOUND = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n";
+
+uint32_t currID = 0;
+uint32_t currChatSize = 0;
 
 struct Reaction {
-	char * user;
-	char * message;
+	char user[16];
+	char message[16];
 };
 
-struct Chat {
-	char * user;
-	char * message;
+struct Chat {	
+	char user[16];
+	char message[256];
 	char timestamp[100];
 	uint32_t num_reaction;
-	Reaction * reactions;
+	Reaction * reaction;
 };
 
+Chat * universal = NULL;
 
-
-
-Chat * universal;
-
-
-
-void handle_response(char *request, int client_socket);
-void create_new_chat(char *path, int client_socket);
+void handle_response(char * request, int client_socket);
 void url_decode(char * source, char * dest);
+uint8_t hextobyte(char c1, char c2);
+void add_new_chat(char * path, int client_socket);
+void add_new_reaction(char * path, int client_socket);
 void print_chat(int client_socket);
-void create_new_reaction(char * path, int client_socket);
-void handle_404(char *path, int client_socket);
+void handle_404(char * path, int client_socket);
 void free_stuff();
 
-	
-	
-	
-	
-void handle_404(char *path, int client_socket) {
+int main(int argc, char ** argv) {
 
-	printf("SERVER LOG: Got request for unrecognized path \"%s\"\r\n", path);
+	uint32_t port = 0;
 
-	char response_buff[BUFFER_SIZE];
-	snprintf(response_buff, BUFFER_SIZE, "Error 404:\r\nUnrecognized path \"%s\"\r\n", path);
-	write(client_socket, HTTP_404_NOT_FOUND, strlen(HTTP_404_NOT_FOUND));
-	write(client_socket, response_buff, strlen(response_buff));
+	if (argc >= 2) {
+		port = atoi(argv[1]);
+	}
+
+	start_server(&handle_response, port);
+
+	return 0;
 
 }
 
-
-
-
 void handle_response(char *request, int client_socket) {
+
 	printf("The user sent a request with: %s\n", request);
 	write(client_socket, HTTP_200_OK, strlen(HTTP_200_OK));
-	printf("\n\n%d\n\n", client_socket);
+	printf("The client socket is %d\n", client_socket);
 	
-	char buffer[2056];
-
+	char buffer[MAX_BUFFER_SIZE];
 	char path[256];
 
 	if (sscanf(request, "GET %255s", path) != 1) {
-		printf("Invalid request line\n");
+		printf("Invalid request line");
 	}
-
-	printf("This is the path: \'%s\'\n", path);
-
+	
+	printf("==THE PATH IS %s==\n", path);
 
 	if ((strstr(path, "/post?user=") != 0) && (strstr(path, "&message=") != 0)) {
-		create_new_chat(path, client_socket);
-
+		printf("Hello you reached POST\n");
+		add_new_chat(path, client_socket);
 	}
 	else if ((strstr(path, "/react?user=") != 0) && (strstr(path, "&message=") != 0) && (strstr(path, "&id=") != 0)) {
-		if (chat_size == 0) {
-			handle_404(path, client_socket);
-		}
-		else {
-			create_new_reaction(path, client_socket);
-		}
+		printf("Hello you reached REACT\n");
+		add_new_reaction(path, client_socket);
 	}
 	else if (strcmp(path, "/reset") == 0) {
-			free_stuff();
+		printf("Hello you reached RESET\n");
+		free_stuff();
 	}
 	else if (strcmp(path, "/chats") == 0) {
+		printf("Hello you reached CHATS\n");
 		print_chat(client_socket);
 	}
 	else {
+		printf("Hello you reached 404\n");
 		handle_404(path, client_socket);
 	}
-
-
-
 
 
 }
 
-void create_new_chat(char *path, int client_socket) {
+void add_new_chat(char * path, int client_socket) {
 
-	if (chat_size > 100000) {
+	if (currChatSize == 100000) {
 		handle_404(path, client_socket);
 		return;
 	}
 
-		
-	printf("You have entered created new chat with path \'%s\'\n", path);
-	//DECODE THE PATH TO THE RIGHT FORMAT
 	char decoded_path[strlen(path)];
 	url_decode(path, decoded_path);
-	printf("\n\n\nHHHHHHHHHHHHH%sHHHHHHHHHHHHH\n\n\n", decoded_path);
 
-	//GET THE LENGTH OF THE USERNAME	
-	char * startP = strstr(decoded_path, "/post?user=") + strlen("/post?user=");
-	char * endP = strstr(decoded_path, "&message=");
-	int length = endP - startP;
+	printf("The decoded path is %s\n", decoded_path);
 
-	if (length == 0) {
+	char * startP1 = strstr(decoded_path, "/post?user=") + strlen("/post?user=");
+	char * endP1 = strstr(decoded_path, "&message=");
+	int userNameLength = endP1 - startP1;
+
+	printf("Name Length: %ld\n", userNameLength);
+
+	if ((userNameLength == 0) || (userNameLength >= MAX_USERNAME_SIZE)) {
 		handle_404(path, client_socket);
 		return;
 	}
-
-	char * tempUser = calloc(length, sizeof(char));
-	strncpy(tempUser, startP, length);
-	printf("%s\n", tempUser);
-	printf("%d\n", length);
-
 	
-	//CHECK IF USERNAME BIGGER THAN 16 BYTES
-	if (strlen(tempUser) > 15 || strlen(tempUser) < 1) {
-		handle_404(path, client_socket);
-		free(tempUser);
-		return;
-	}	
-
-	//GET THE LENGTH OF THE MESSAGE, endP points to the first character and strlen iterates till we get a null term
-	length = strlen(endP + strlen("&message="));
+	char * startP2 = strstr(decoded_path, "&message=") + strlen("&message=");
 	
-	if (length == 0) {
+	int messageLength = strlen(startP2);
+	
+	printf("Message Length: %d\n", messageLength);
+
+	if ((messageLength == 0) || (messageLength > MAX_MESSAGE_SIZE)) {
 		handle_404(path, client_socket);
-		free(tempUser);
 		return;
 	}
-
-	char * tempMessage = calloc(length, sizeof(char));
-	strncpy(tempMessage, endP + strlen("&message="), length);
-	printf("%s\n", tempMessage);
-	printf("%d\n", length);
 	
-	//CHECK IF MESSAGE LESS THAN 1 BYTES
-	if (strlen(tempMessage) < 1 || strlen(tempMessage) > 255) {
-		handle_404(path, client_socket);
-		free(tempUser);
-		free(tempMessage);
-		return;
-	}	
-
-	//REALLOCATE NEW STRUCTS EVERYTIME WE CALL NEW CHATS	
-	if (chat_size == 0) {
-		chat_size++;
-		universal = calloc(chat_size, sizeof(Chat));
-	}
-	else {
-		chat_size++;
-		universal = realloc(universal, chat_size * sizeof(Chat));
-	}
-	//PUT IT IN THE GLOBAL STRUCT OF CHAT
-	universal[chat_id].user = tempUser;
-	universal[chat_id].message = tempMessage;
-	universal[chat_id].num_reaction = 0;
-	universal[chat_id].reactions = NULL;
-
-	printf("%s\n%s\n", universal[chat_id].user, universal[chat_id].message);
+	currChatSize++;
+	universal = realloc(universal, currChatSize * sizeof(Chat));
 	
-	//GET THE TIMe
+
+	strncpy(universal[currID].user, startP1, userNameLength);
+	strncpy(universal[currID].message, startP2, messageLength);
+	universal[currID].user[userNameLength] = '\0';
+	universal[currID].message[messageLength] = '\0';
+	universal[currID].num_reaction = 0;
+	universal[currID].reaction = NULL;
 	
-	char buffer[100];
 	time_t now = time(NULL);
 	struct tm *tm_info = localtime(&now);
-	strftime(universal[chat_id].timestamp, 100, "%Y-%m-\%d %H:%M:\%S", tm_info);
-/*	printf("\n%s\n", buffer);
-	char * timeInHeap = calloc(strlen(buffer), sizeof(char));
-	strcpy(timeInHeap, buffer); */
-
-	//strcpy(universal[chat_id].timestamp, buffer);
-	printf("\n%s\n", universal[chat_id].timestamp);
-
+	strftime(universal[currID].timestamp, 100, "%Y-%m-\%d %H:%M:\%S", tm_info);
+		
 	
-	chat_id++;
 
-	//WRITE TO THE BOWSER
+	printf("The user name is: %s\n", universal[currID].user);
+	printf("The message is: %s\n", universal[currID].message);
+	
+	currID++;
+
 	print_chat(client_socket);
+
 
 }
 
-
-void create_new_reaction(char * path, int client_socket) {
-
-
-	printf("You have entered created new chat with path \'%s\'\n", path);
-	//DECODE THE PATH TO THE RIGHT FORMAT
+void add_new_reaction(char * path, int client_socket) {
+	
 	char decoded_path[strlen(path)];
 	url_decode(path, decoded_path);
 
-	//GET THE LENGTH OF THE USERNAME	
-	char * startP = strstr(decoded_path, "/react?user=") + strlen("/react?user=");
-	char * endP = strstr(decoded_path, "&message=");
-	int length = endP - startP;
-	
-	if (length == 0) {
+	printf("The decoded path is %s\n", decoded_path);
+
+	char * startP1 = strstr(decoded_path, "/react?user=") + strlen("/react?user=");
+	char * endP1 = strstr(decoded_path, "&message=");
+	int userNameLength = endP1 - startP1;
+
+	printf("Name Length: %ld\n", userNameLength);
+
+	if ((userNameLength == 0) || (userNameLength >= MAX_USERNAME_SIZE)) {
 		handle_404(path, client_socket);
 		return;
 	}
 	
-	char * tempUser = calloc(length, sizeof(char));
-	strncpy(tempUser, startP, length);
-	printf("%s\n", tempUser);
-	printf("%d\n", length);
-	
-	//CHECK IF USERNAME BIGGER THAN 16 BYTES
-	if (strlen(tempUser) > 15 || strlen(tempUser) < 1) {
-		handle_404(path, client_socket);
-		free(tempUser);
-		return;
-	}	
+	char * startP2 = strstr(decoded_path, "&message=") + strlen("&message=");
+	char * endP2 = strstr(decoded_path, "&id=");
+	int messageLength = endP2 - startP2;	
+	printf("Message Length: %d\n", messageLength);
 
-
-	//GET THE LENGTH OF THE MESSAGE
-	endP = strstr(decoded_path, "&id=");
-	startP = strstr(decoded_path, "&message=") + strlen("&message=");
-	length = endP - startP;	
-	
-	if (length == 0) {
-		handle_404(path, client_socket);
-		return;
-	}
-	
-	char * tempMessage = calloc(length, sizeof(char));
-	strncpy(tempMessage, startP, length);
-	printf("%s\n", tempMessage);
-	printf("%d\n", length);
-
-	
-	//CHECK IF MESSAGE BIGGER THAN 16 BYTES
-	if (strlen(tempMessage) > 15) {
-		handle_404(path, client_socket);
-		free(tempUser);
-		free(tempMessage);
-		return;
-	}	
-
-	startP = endP + strlen("&id=");
-	length = strlen(startP);
-	
-	if (length == 0) {
-		handle_404(path, client_socket);
-		return;
-	}
-	
-	char * tempID = calloc(length, sizeof(char));
-	strncpy(tempID, startP, length);
-	printf("%s\n", tempID);
-	printf("%d\n", length);
-	int realID = atoi(tempID) - 1;
-	
-	free(tempID);
-	
-	//CHECK IF ID IS BIGGER THAN CHAT SIZE OR NEGATIVE
-	if ((realID < 0) || (realID > chat_id - 1) || (universal[realID].num_reaction > 100)) {
+	if ((messageLength == 0) || (messageLength >= MAX_USERNAME_SIZE)) {	
 		handle_404(path, client_socket);
 		return;
 	}
 
-
-	if (universal[realID].num_reaction == 0) {
-		universal[realID].num_reaction++;
-		universal[realID].reactions = calloc(universal[realID].num_reaction, sizeof(Reaction));
+	char * startP3 = strstr(decoded_path, "&id=") + strlen("&id=");
+	char tempStringID[10];
+	strcpy(tempStringID, startP3);
+	tempStringID[strlen(startP3)] = 0;
+	int i = 0;
+	int tempStringIDLength = strlen(tempStringID);
+	for ( ; i < tempStringIDLength; i++) {
+		if (!(tempStringID[i] >= '0' && tempStringID[i] <= '9')) {
+			handle_404(path, client_socket);
+			return;
+		}
 	}
-	else {
-		universal[realID].num_reaction++;
-		universal[realID].reactions = realloc(universal[realID].reactions, universal[realID].num_reaction * sizeof(Reaction));
-	}
-
-	universal[realID].reactions[universal[realID].num_reaction - 1].user = tempUser;
-	universal[realID].reactions[universal[realID].num_reaction - 1].message = tempMessage;
 	
-	printf("%s\n", universal[realID].reactions[universal[realID].num_reaction - 1].user);
+	int realID = atoi(tempStringID) - 1;
 
-	printf("%s\n", universal[realID].reactions[universal[realID].num_reaction - 1].message);
+	if (realID >= currID || realID < 0) {
+		handle_404(path, client_socket);
+		return;
+	}
 
+	if (universa[realID].num_reaction == 100) {
+		handle_404(path, client_socket);
+		return;
+	}
+
+	universal[realID].num_reaction++;
+
+	universal[realID].reaction = realloc(universal[realID].reaction, universal[realID].num_reaction * sizeof(Reaction));
+	
+	int rIndex = universal[realID].num_reaction - 1;
+
+	strncpy(universal[realID].reaction[rIndex].user, startP1, userNameLength);
+	strncpy(universal[realID].reaction[rIndex].message, startP2, messageLength);
+	universal[realID].reaction[rIndex].user[userNameLength] = '\0';
+	universal[realID].reaction[rIndex].message[messageLength] = '\0';
 
 	print_chat(client_socket);
 
+}	
 
+void url_decode(char * source, char * dest) {
 
-}
-
-
-
-
-void print_chat(int client_socket) {
-	
-	char bufferP[2056];
-	int i = 0;
-	
-	//write(client_socket, HTTP_200_OK, strlen(HTTP_200_OK));
-	
-	for (; i < chat_id; i++) {
-		snprintf(bufferP, 2056, "[#%d %s]        %20s: %s\r\n", i + 1, universal[i].timestamp, universal[i].user, universal[i].message);
-		write(client_socket, bufferP, strlen(bufferP));
-		int j = 0;
-		for (;j < universal[i].num_reaction; j++) {
-			snprintf(bufferP, 2056, "                             %24s) %s\r\n", universal[i].reactions[j].user, universal[i].reactions[j].message);
-			
-			char * index = strstr(bufferP, universal[i].reactions[j].user) - 1;
-			*index = '(';
-			write(client_socket, bufferP, strlen(bufferP));
-		}
-	}
-
-}
-
-void free_stuff() {
-
-	if (chat_size == 0) {
-		return;
-	}
+	char *p_src = source;
+	char *p_dest = dest;
 
 	int i = 0;
-	for ( ; i < chat_size; i++) {
-		free(universal[i].user);
-		free(universal[i].message);
-//		free(universal[i].timestamp);
 
-		int j = 0;
-		for ( ; j < universal[i].num_reaction; j++) {
-			free(universal[i].reactions[j].user);
-			free(universal[i].reactions[j].message);
+	while (*p_src) {
+		if (*p_src == '%') {
+			*p_dest = hextobyte(*(p_src + 1), *(p_src + 2));
+			p_src += 2;
 		}
-		free(universal[i].reactions);
+		else {
+			*p_dest = *p_src;
+		}
+		p_src++;
+		p_dest++;
 	}
-
-	free(universal);
-
-	chat_size = 0;
-	chat_id = 0;
-
+	*p_dest = 0;
 }
 
 uint8_t hextobyte(char c1, char c2) {
@@ -371,7 +260,7 @@ uint8_t hextobyte(char c1, char c2) {
 		f = c1 - 'A' + 10;
 	}
 
-		
+	
 	if (c2 >= '0' && c2 <= '9') {
 		s = c2 - '0';
 	}
@@ -382,56 +271,63 @@ uint8_t hextobyte(char c1, char c2) {
 		s = c2 - 'A' + 10;
 	}
 
-
 	return (f << 4) | s;
 
-
 }
 
-void url_decode(char * source, char * dest) {
-	
-	char *p_src = source;
-	char *p_dest = dest;
+void free_stuff() {
+
+	if (currChatSize == 0) {
+		return;
+	}
 
 	int i = 0;
-	
-	while (*p_src) {
-		if (*p_src == '%') {
-			*p_dest = hextobyte(*(p_src + 1), *(p_src + 2));
-			p_src += 2;
-		}
-		else {
-			*p_dest = *p_src;
-		}
-		p_src++;
-		p_dest++;
+
+	for ( ; i < currChatSize; i++) {
+		free(universal[i].reaction);
 	}
-	*p_dest = 0;
-}
 
-
-void register_name() {
-
-	
-
-
+	free(universal);
+	universal = NULL;
+	currChatSize = 0;
+	currID = 0;
 
 
 
 }
 
 
-
-
-int main(int argc, char ** argv) {
-
-	int port = 0;
-
-	if (argc >= 2) {
-		port = atoi(argv[1]);
-	}
+void print_chat(int client_socket) {
 	
-	start_server(&handle_response, port);
+	char buffer[MAX_BUFFER_SIZE];
+	char buffer2[MAX_BUFFER_SIZE];
+	char * index;
 
-	return 0;
+	int i = 0;
+	for ( ; i < currChatSize; i++) {
+		snprintf(buffer, MAX_BUFFER_SIZE, "[#%d %s] %40s: %s\r\n", i + 1, universal[i].timestamp, universal[i].user, universal[i].message);
+		write(client_socket, buffer, strlen(buffer));
+		int j = 0;
+		for ( ; j < universal[i].num_reaction; j++) {
+			snprintf(buffer2, MAX_BUFFER_SIZE, "%64s) %s\r\n", universal[i].reaction[j].user, universal[i].reaction[j].message);
+			index = strstr(buffer2, universal[i].reaction[j].user) - 1;
+			*index = '(';
+			write(client_socket, buffer2, strlen(buffer2));
+		}
+	}	
+
+
+}
+
+void handle_404(char * path, int client_socket) {
+
+	printf("SERVER LOG: Got request for unrecognized path \"%s\"\n", path);
+
+	char buffer[MAX_BUFFER_SIZE];
+
+	snprintf(buffer, MAX_BUFFER_SIZE, "Error 404:\r\n Unrecognized \"%s\"\n", path);
+	write(client_socket, HTTP_404_NOT_FOUND, strlen(HTTP_404_NOT_FOUND));
+	write(client_socket, buffer, strlen(buffer));
+	
+
 }
